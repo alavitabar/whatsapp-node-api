@@ -3,6 +3,7 @@ const { MessageMedia, Location } = require("whatsapp-web.js");
 const request = require('request')
 const vuri = require('valid-url');
 const fs = require('fs');
+const config = require("./../config.json");
 
 const mediadownloader = (url, path, callback) => {
     request.head(url, (err, res, body) => {
@@ -31,7 +32,7 @@ router.post('/sendmessage/:phone', async (req,res) => {
         MongoClient.connect(url, function(err, db) {
             if (err) throw err;
             var dbo = db.db("whatsappdb");
-            var msgobj = {number: phone, message: message, date: formatDate(new Date()), app: 5000 };
+            var msgobj = {number: phone, message: message, date: formatDate(new Date()), app: config.port };
             dbo.collection("messages").insertOne(msgobj, function(err, res) {
                 if (err) throw err;
                 console.log("1 document inserted");
