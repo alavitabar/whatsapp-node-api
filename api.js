@@ -1,80 +1,199 @@
-const express = require("express");
-const bodyParser = require("body-parser");
-const fs = require("fs");
-const axios = require("axios");
-const shelljs = require("shelljs");
+const router = require('express').Router();
+const { MessageMedia, Location } = require("whatsapp-web.js");
+const request = require('request')
+const vuri = require('valid-url');
+const fs = require('fs');
+const config = require("./../config.json");
 
-const config = require("./config.json");
-const { Client, LocalAuth } = require("whatsapp-web.js");
-
-process.title = "whatsapp-node-api";
-global.client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: { headless: true },
-});
-
-global.authed = false;
-
-const app = express();
-
-const port = process.env.PORT || config.port;
-//Set Request Size Limit 50 MB
-app.use(bodyParser.json({ limit: "50mb" }));
-
-app.use(express.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-
-client.on("qr", (qr) => {
-  console.log("qr");
-  fs.writeFileSync("./components/last.qr", qr);
-});
-
-client.on("authenticated", () => {
-  console.log("AUTH!");
-  authed = true;
-
-  try {
-    fs.unlinkSync("./components/last.qr");
-  } catch (err) {}
-});
-
-client.on("auth_failure", () => {
-  console.log("AUTH Failed !");
-  process.exit();
-});
-
-client.on("ready", () => {
-  console.log("Client is ready!");
-});
-
-client.on("message", async (msg) => {
-  if (config.webhook.enabled) {
-    if (msg.hasMedia) {
-      const attachmentData = await msg.downloadMedia();
-      msg.attachmentData = attachmentData;
-    }
-    axios.post(config.webhook.path, { msg });
+const mediadownloader = (url, path, callback) => {
+    request.head(url, (err, res, body) => {
+      request(url)
+        .pipe(fs.createWriteStream(path))
+        .on('close', callback)
+    })
   }
-});
-client.on("disconnected", () => {
-  console.log("disconnected");
-});
-client.initialize();
 
-const chatRoute = require("./components/chatting");
-const groupRoute = require("./components/group");
-const authRoute = require("./components/auth");
-const contactRoute = require("./components/contact");
+var MongoClient = require('mongodb').MongoClient;
+var url = "mongodb://localhost:27017/";
 
-app.use(function (req, res, next) {
-  console.log(req.method + " : " + req.path);
-  next();
-});
-app.use("/chat", chatRoute);
-app.use("/group", groupRoute);
-app.use("/auth", authRoute);
-app.use("/contact", contactRoute);
+router.post('/sendmessage/:phone', async (req,res) => {
+    let phone = req.params.phone;
+    let message = req.body.message;
 
-app.listen(port, () => {
-  console.log("Server Running Live on Port : " + port);
+    if (phone == undefined || message == undefined) {
+        res.send({ status:"error", message:"please enter valid phone and message" })
+    } else {
+        client.sendMessage(phone + '@c.us', message).then((response) => {
+            if (response.id.fromMe) {
+                res.send({ status:'success', message: `Message successfully sent to ${phone}` })
+            }
+        });
+
+        MongoClient.connect(url, function(err, db) {
+            if (err) throw err;
+            var dbo = db.db("whatsappdb");
+            var msgobj = {number: phone, message: message, date: formatDate(new Date()), app: config.port };
+            dbo.collection("messages").insertOne(msgobj, function(err, res) {
+                if (err) throw err;
+                console.log("1 document inserted");
+                db.close();
+            });
+        });
+    }
 });
+
+router.post('/sendimage/:phone', async (req,res) => {
+    var base64regex = /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/;
+
+    let phone = req.params.phone;
+    let image = req.body.image;
+    let caption = req.body.caption;
+
+    if (phone == undefined || image == undefined) {
+        res.send({ status: "error", message: "please enter valid phone and base64/url of image" })
+    } else {
+        if (base64regex.test(image)) {
+            let media = new MessageMedia('image/png',image);
+            client.sendMessage(`${phone}@c.us`, media, { caption: caption || '' }).then((response) => {
+                if (response.id.fromMe) {
+                    res.send({ status: 'success', message: `MediaMessage successfully sent to ${phone}` })
+                }
+            });
+        } else if (vuri.isWebUri(image)) {
+            if (!fs.existsSync('./temp')) {
+                await fs.mkdirSync('./temp');
+            }
+
+            var path = './temp/' + image.split("/").slice(-1)[0]
+            mediadownloader(image, path, () => {
+                let media = MessageMedia.fromFilePath(path);
+                
+                client.sendMessage(`${phone}@c.us`, media, { caption: caption || '' }).then((response) => {
+                    if (response.id.fromMe) {
+                        res.send({ status: 'success', message: `MediaMessage successfully sent to ${phone}` })
+                        fs.unlinkSync(path)
+                    }
+                });
+            })
+        } else {
+            res.send({ status:'error', message: 'Invalid URL/Base64 Encoded Media' })
+        }
+    }
+});
+
+router.post('/sendpdf/:phone', async (req,res) => {
+    var base64regex = /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/;
+
+    let phone = req.params.phone;
+    let pdf = req.body.pdf;
+
+    if (phone == undefined || pdf == undefined) {
+        res.send({ status: "error", message: "please enter valid phone and base64/url of pdf" })
+    } else {
+        if (base64regex.test(pdf)) {
+            let media = new MessageMedia('application/pdf', pdf);
+            client.sendMessage(`${phone}@c.us`, media).then((response) => {
+                if (response.id.fromMe) {
+                    res.send({ status: 'success', message: `MediaMessage successfully sent to ${phone}` })
+                }
+            });
+        } else if (vuri.isWebUri(pdf)) {
+            if (!fs.existsSync('./temp')) {
+                await fs.mkdirSync('./temp');
+            }
+
+            var path = './temp/' + pdf.split("/").slice(-1)[0]
+            mediadownloader(pdf, path, () => {
+                let media = MessageMedia.fromFilePath(path);
+                client.sendMessage(`${phone}@c.us`, media).then((response) => {
+                    if (response.id.fromMe) {
+                        res.send({ status: 'success', message: `MediaMessage successfully sent to ${phone}` })
+                        fs.unlinkSync(path)
+                    }
+                });
+            })
+        } else {
+            res.send({ status: 'error', message: 'Invalid URL/Base64 Encoded Media' })
+        }
+    }
+});
+
+router.post('/sendlocation/:phone', async (req, res) => {
+    let phone = req.params.phone;
+    let latitude = req.body.latitude;
+    let longitude = req.body.longitude;
+    let desc = req.body.description;
+
+    if (phone == undefined || latitude == undefined || longitude == undefined) { 
+        res.send({ status: "error", message: "please enter valid phone, latitude and longitude" })
+    } else {
+        let loc = new Location(latitude, longitude, desc || "");
+        client.sendMessage(`${phone}@c.us`, loc).then((response)=>{
+            if (response.id.fromMe) {
+                res.send({ status: 'success', message: `MediaMessage successfully sent to ${phone}` })
+            }
+        });
+    }
+});
+
+router.get('/getchatbyid/:phone', async (req, res) => {
+    let phone = req.params.phone;
+    if (phone == undefined) {
+        res.send({status:"error",message:"please enter valid phone number"});
+    } else {
+        client.getChatById(`${phone}@c.us`).then((chat) => {
+            res.send({ status:"success", message: chat });
+        }).catch(() => {
+            console.error("getchaterror")
+            res.send({ status: "error", message: "getchaterror" })
+        })
+    }
+});
+
+router.get('/getchats', async (req, res) => {
+    client.getChats().then((chats) => {
+        res.send({ status: "success", message: chats});
+    }).catch(() => {
+        res.send({ status: "error",message: "getchatserror" })
+    })
+});
+
+router.get('/getmessages/:phone', async (req, res) => {
+    let phone = req.params.phone;
+    let fromDate = req.body.fromDate;
+    let toDate = req.body.toDate;
+
+    MongoClient.connect(url, function(err, db) {
+        if (err) throw err;
+        var dbo = db.db("whatsappdb");
+        var query = { number: phone, date:{ "$gte": fromDate,"$lte": toDate }};
+        dbo.collection("messages").find(query).toArray(function(err, result) {
+            if (err) throw err;
+            // console.log(result);
+            res.send({result})
+            db.close();
+        });
+    });
+});
+
+function padTo2Digits(num) {
+    return num.toString().padStart(2, '0');
+}
+
+function formatDate(date) {
+    return (
+    [
+        date.getFullYear(),
+        padTo2Digits(date.getMonth() + 1),
+        padTo2Digits(date.getDate()),
+    ].join('-') +
+    ' ' +
+    [
+        padTo2Digits(date.getHours()),
+        padTo2Digits(date.getMinutes()),
+        padTo2Digits(date.getSeconds()),
+    ].join(':')
+    );
+}
+
+module.exports = router;
