@@ -19,8 +19,11 @@ var url = "mongodb://localhost:27017/";
 router.post('/sendmessage/:phone', async (req,res) => {
     let phone = req.params.phone;
     let message = req.body.message;
-
-    if (phone == undefined || message == undefined) {
+    let token = req.body.token;
+    
+    if (token != "3w8h0yEp0nA0CZQoYqke"){
+        res.send({ status:"error", message:"please enter valid token" })
+    } else if (phone == undefined || message == undefined) {
         res.send({ status:"error", message:"please enter valid phone and message" })
     } else {
         client.sendMessage(phone + '@c.us', message).then((response) => {
@@ -48,8 +51,11 @@ router.post('/sendimage/:phone', async (req,res) => {
     let phone = req.params.phone;
     let image = req.body.image;
     let caption = req.body.caption;
+    let token = req.body.token;
 
-    if (phone == undefined || image == undefined) {
+    if (token != "3w8h0yEp0nA0CZQoYqke"){
+        res.send({ status:"error", message:"please enter valid token" })
+    } else if (phone == undefined || image == undefined) {
         res.send({ status: "error", message: "please enter valid phone and base64/url of image" })
     } else {
         if (base64regex.test(image)) {
@@ -86,8 +92,11 @@ router.post('/sendpdf/:phone', async (req,res) => {
 
     let phone = req.params.phone;
     let pdf = req.body.pdf;
+    let token = req.body.token;
 
-    if (phone == undefined || pdf == undefined) {
+    if (token != "3w8h0yEp0nA0CZQoYqke"){
+        res.send({ status:"error", message:"please enter valid token" })
+    } else if (phone == undefined || pdf == undefined) {
         res.send({ status: "error", message: "please enter valid phone and base64/url of pdf" })
     } else {
         if (base64regex.test(pdf)) {
@@ -123,8 +132,11 @@ router.post('/sendlocation/:phone', async (req, res) => {
     let latitude = req.body.latitude;
     let longitude = req.body.longitude;
     let desc = req.body.description;
+    let token = req.body.token;
 
-    if (phone == undefined || latitude == undefined || longitude == undefined) { 
+    if (token != "3w8h0yEp0nA0CZQoYqke"){
+        res.send({ status:"error", message:"please enter valid token" })
+    } else if (phone == undefined || latitude == undefined || longitude == undefined) { 
         res.send({ status: "error", message: "please enter valid phone, latitude and longitude" })
     } else {
         let loc = new Location(latitude, longitude, desc || "");
@@ -138,7 +150,11 @@ router.post('/sendlocation/:phone', async (req, res) => {
 
 router.get('/getchatbyid/:phone', async (req, res) => {
     let phone = req.params.phone;
-    if (phone == undefined) {
+    let token = req.body.token;
+
+    if (token != "3w8h0yEp0nA0CZQoYqke"){
+        res.send({ status:"error", message:"please enter valid token" })
+    } else if (phone == undefined) {
         res.send({status:"error",message:"please enter valid phone number"});
     } else {
         client.getChatById(`${phone}@c.us`).then((chat) => {
@@ -151,29 +167,40 @@ router.get('/getchatbyid/:phone', async (req, res) => {
 });
 
 router.get('/getchats', async (req, res) => {
-    client.getChats().then((chats) => {
-        res.send({ status: "success", message: chats});
-    }).catch(() => {
-        res.send({ status: "error",message: "getchatserror" })
-    })
+    let token = req.body.token;
+
+    if (token != "3w8h0yEp0nA0CZQoYqke"){
+        res.send({ status:"error", message:"please enter valid token" })
+    } else {
+        client.getChats().then((chats) => {
+            res.send({ status: "success", message: chats});
+        }).catch(() => {
+            res.send({ status: "error",message: "getchatserror" })
+        })
+    }
 });
 
 router.get('/getmessages/:phone', async (req, res) => {
     let phone = req.params.phone;
     let fromDate = req.body.fromDate;
     let toDate = req.body.toDate;
+    let token = req.body.token;
 
-    MongoClient.connect(url, function(err, db) {
-        if (err) throw err;
-        var dbo = db.db("whatsappdb");
-        var query = { number: phone, date:{ "$gte": fromDate,"$lte": toDate }};
-        dbo.collection("messages").find(query).toArray(function(err, result) {
+    if (token != "3w8h0yEp0nA0CZQoYqke"){
+        res.send({ status:"error", message:"please enter valid token" })
+    } else {
+        MongoClient.connect(url, function(err, db) {
             if (err) throw err;
-            // console.log(result);
-            res.send({result})
-            db.close();
+            var dbo = db.db("whatsappdb");
+            var query = { number: phone, date:{ "$gte": fromDate,"$lte": toDate }};
+            dbo.collection("messages").find(query).toArray(function(err, result) {
+                if (err) throw err;
+                // console.log(result);
+                res.send({result})
+                db.close();
+            });
         });
-    });
+    }
 });
 
 function padTo2Digits(num) {
